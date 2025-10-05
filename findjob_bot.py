@@ -269,51 +269,36 @@ async def main() -> None:
                 await finalize_placeholder_or_fallback(bot, placeholder, chat_id, summary_text)
                 if thread.ranked_jobs:
                     keyboard = build_vacancy_keyboard(thread.ranked_jobs)
-                    if thread.vacancy_menu_message_id:
-                        try:
-                            await bot.edit_message_reply_markup(
-                                chat_id=chat_id,
-                                message_id=thread.vacancy_menu_message_id,
-                                reply_markup=keyboard,
-                            )
-                        except Exception:
-                            msg = await bot.send_message(
-                                chat_id,
-                                "Выберите вакансию для подробностей:",
-                                reply_markup=keyboard,
-                                disable_web_page_preview=True,
-                                parse_mode=None,
-                            )
-                            thread.vacancy_menu_message_id = msg.message_id
-                    else:
-                        msg = await bot.send_message(
-                            chat_id,
-                            "Выберите вакансию для подробностей:",
-                            reply_markup=keyboard,
-                            disable_web_page_preview=True,
-                            parse_mode=None,
-                        )
-                        thread.vacancy_menu_message_id = msg.message_id
-                else:
-                    if thread.vacancy_menu_message_id:
+                    previous_menu_id = thread.vacancy_menu_message_id
+                    if previous_menu_id:
+                        thread.vacancy_menu_message_id = None
                         with contextlib.suppress(Exception):
-                            await bot.edit_message_text(
-                                "Подходящих вакансий больше нет.",
-                                chat_id=chat_id,
-                                message_id=thread.vacancy_menu_message_id,
-                                parse_mode=None,
-                            )
+                            await bot.delete_message(chat_id, previous_menu_id)
+                    msg = await bot.send_message(
+                        chat_id,
+                        "Выберите вакансию для подробностей:",
+                        reply_markup=keyboard,
+                        disable_web_page_preview=True,
+                        parse_mode=None,
+                    )
+                    thread.vacancy_menu_message_id = msg.message_id
+                else:
+                    previous_menu_id = thread.vacancy_menu_message_id
                     thread.vacancy_menu_message_id = None
+                    if previous_menu_id:
+                        with contextlib.suppress(Exception):
+                            await bot.delete_message(chat_id, previous_menu_id)
+                    await bot.send_message(
+                        chat_id,
+                        "Подходящих вакансий больше нет.",
+                        parse_mode=None,
+                    )
             else:
-                if thread.vacancy_menu_message_id:
-                    with contextlib.suppress(Exception):
-                        await bot.edit_message_text(
-                            "Подходящих вакансий больше нет.",
-                            chat_id=chat_id,
-                            message_id=thread.vacancy_menu_message_id,
-                            parse_mode=None,
-                        )
+                previous_menu_id = thread.vacancy_menu_message_id
                 thread.vacancy_menu_message_id = None
+                if previous_menu_id:
+                    with contextlib.suppress(Exception):
+                        await bot.delete_message(chat_id, previous_menu_id)
                 await finalize_placeholder_or_fallback(
                     bot,
                     placeholder,

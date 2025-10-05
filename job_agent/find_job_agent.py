@@ -465,9 +465,9 @@ def score_job(job: Dict[str, Any], resume_tokens: List[str], features: Dict[str,
             features=features,
             weights=SemanticScoreWeights(
                 title_position=0.2,
-                skills_resume=0.15,
-                description_resume=0.4,
-                experience_resume=0.25,
+                skills_resume=0.25,
+                description_resume=0.55,
+                experience_resume=0.0,
             ),
         )
         score = 0.4 * score + 0.6 * float(semantic_score)

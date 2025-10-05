@@ -26,8 +26,8 @@ class SemanticScoreWeights:
 
     title_position: float = 0.35
     skills_resume: float = 0.2
-    description_resume: float = 0.3
-    experience_resume: float = 0.15
+    description_resume: float = 0.45
+    experience_resume: float = 0
 
     def as_mapping(self) -> Dict[str, float]:
         return asdict(self)
