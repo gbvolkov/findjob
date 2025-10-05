@@ -1,2 +1,2 @@
 rm nohup.out
-nohup python sd_ass_bot.py &
+nohup python findjob_bot.py &
