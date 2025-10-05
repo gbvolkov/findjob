@@ -23,6 +23,7 @@ from utils.llm_logger import JSONFileTracer
 import config
 from hh_search import search_vacancies, resolve_area_id
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,20 +77,14 @@ def _normalise_vacancy(item: Dict[str, Any]) -> Dict[str, Any]:
     area = item.get("area") or {}
     address = item.get("address") or {}
 
-    if isinstance(area, dict):
-        location = area.get("name") or ""
-    else:
-        location = area or ""
+    location = area.get("name") or "" if isinstance(area, dict) else area or ""
     if not location and isinstance(address, dict):
         location = address.get("raw") or address.get("city") or ""
 
     raw_skills = item.get("key_skills") or []
     skills: List[str] = []
     for skill in raw_skills:
-        if isinstance(skill, dict):
-            name = skill.get("name")
-        else:
-            name = skill
+        name = skill.get("name") if isinstance(skill, dict) else skill
         if isinstance(name, str) and name.strip():
             skills.append(name.strip())
 
@@ -145,49 +140,42 @@ def _resolve_area_ids(locations: List[str]) -> Dict[str, Optional[str]]:
     return resolved
 
 
-def _rerank_vacancies(vacancies: List[Dict[str, Any]], features: Dict[str, Any], resume_text: str) -> List[Dict[str, Any]]:
-    resume_tokens = set(_tokenize(resume_text))
-    position_terms = [set(_tokenize(pos)) for pos in features.get("positions", []) if isinstance(pos, str) and pos]
-
-    def score(job: Dict[str, Any]) -> float:
-        base_score = job.get("match_score") or 0.0
-        try:
-            score_value = float(base_score)
-        except (TypeError, ValueError):
-            score_value = 0.0
-
-        title_tokens = set(_tokenize(job.get("title") or ""))
-        for tokens in position_terms:
-            if not tokens:
-                continue
-            if tokens.issubset(title_tokens):
-                score_value += 3.0
-            else:
-                overlap = len(tokens & title_tokens)
-                if overlap:
-                    score_value += 1.5 * (overlap / len(tokens))
-
-        skills = [s.lower() for s in job.get("skills", []) if isinstance(s, str)]
-        if skills and resume_tokens:
-            skill_hits = sum(1 for s in skills if s in resume_tokens)
-            score_value += skill_hits * 1.2
-
-        description_tokens = set(_tokenize(job.get("description") or ""))
-        if description_tokens and resume_tokens:
-            overlap_desc = len(description_tokens & resume_tokens)
-            score_value += min(overlap_desc, 30) * 0.08
-
-        experience_tokens = set(_tokenize(job.get("experience") or ""))
-        if experience_tokens and resume_tokens:
-            exp_overlap = len(experience_tokens & resume_tokens)
-            score_value += exp_overlap * 0.2
-
-        return round(score_value, 4)
-
-    for job in vacancies:
-        job["rank_score"] = score(job)
-
-    vacancies.sort(key=lambda job: job.get("rank_score", 0.0), reverse=True)
+def _rerank_vacancies(vacancies: List[Dict[str, Any]], features: Dict[str, Any], resume_text: str) -> List[Dict[str, Any]]: 
+    resume_tokens = set(_tokenize(resume_text)) 
+    position_terms = [set(_tokenize(pos)) for pos in features.get("positions", []) if isinstance(pos, str) and pos] 
+    def score(job: Dict[str, Any]) -> float: 
+        base_score = job.get("match_score") or 0.0 
+        try: 
+            score_value = float(base_score) 
+        except (TypeError, ValueError): 
+            score_value = 0.0 
+        title_tokens = set(_tokenize(job.get("title") or "")) 
+        for tokens in position_terms: 
+            if not tokens: 
+                continue 
+            if tokens.issubset(title_tokens): 
+                score_value += 3.0 
+            else: 
+                overlap = len(tokens & title_tokens) 
+                if overlap: 
+                    score_value += 1.5 * (overlap / len(tokens)) 
+        skills = [s.lower() for s in job.get("skills", []) if isinstance(s, str)] 
+        if skills and resume_tokens: 
+            skill_hits = sum(s in resume_tokens
+                         for s in skills) 
+            score_value += skill_hits * 1.2 
+        description_tokens = set(_tokenize(job.get("description") or "")) 
+        if description_tokens and resume_tokens: 
+            overlap_desc = len(description_tokens & resume_tokens) 
+            score_value += min(overlap_desc, 30) * 0.08 
+        experience_tokens = set(_tokenize(job.get("experience") or "")) 
+        if experience_tokens and resume_tokens: 
+            exp_overlap = len(experience_tokens & resume_tokens) 
+            score_value += exp_overlap * 0.2 
+        return round(score_value, 4) 
+    for job in vacancies: 
+        job["rank_score"] = score(job) 
+    vacancies.sort(key=lambda job: job.get("rank_score", 0.0), reverse=True) 
     return vacancies
 
 
@@ -201,11 +189,7 @@ def hh_search_vacancies(
     locations = [l.strip() for l in features.get("locations", []) if isinstance(l, str) and l.strip()]
     salary_range = features.get("salary_range") or {}
     salary_min = salary_range.get("min")
-    if isinstance(salary_min, (float, int)):
-        salary_min = int(salary_min)
-    else:
-        salary_min = None
-
+    salary_min = int(salary_min) if isinstance(salary_min, (float, int)) else None
     per_page = max(1, min(per_page, 100))
     area_lookup = _resolve_area_ids(locations[:MAX_LOCATION_QUERIES])
     seen_ids: set[str] = set()
@@ -221,10 +205,8 @@ def hh_search_vacancies(
 
     query_terms = []
     for pos in query_positions:
-        cleaned = pos.replace('"', '').strip()
-        if not cleaned:
-            continue
-        query_terms.append(f'({cleaned})')
+        if cleaned := pos.replace('"', '').strip():
+            query_terms.append(f'({cleaned})')
     query_text = HH_QUERY_TEMPLATE.format(terms=' OR '.join(query_terms)) if query_terms else "Специалист"
 
     query_locations: List[Optional[str]] = locations[:MAX_LOCATION_QUERIES] or [None]
@@ -248,9 +230,9 @@ def hh_search_vacancies(
             vacancy_id = vacancy.get("id")
             if vacancy_id is not None:
                 vacancy_id = str(vacancy_id)
-            if vacancy_id and vacancy_id in seen_ids:
-                continue
             if vacancy_id:
+                if vacancy_id in seen_ids:
+                    continue
                 seen_ids.add(vacancy_id)
             normalised = _normalise_vacancy(vacancy)
             normalised["search_position"] = query_text
@@ -261,9 +243,7 @@ def hh_search_vacancies(
         return []
 
     reranked = _rerank_vacancies(vacancies, features, resume_text)
-    if max_results:
-        return reranked[:max_results]
-    return reranked
+    return reranked[:max_results] if max_results else reranked
 
 
 
@@ -277,26 +257,27 @@ def _read_resume_text(state: JobAgentState) -> str:
                 text_parts.append(part.get("text", ""))
             elif isinstance(part, str):
                 text_parts.append(part)
-        candidate_text = "\n".join(p.strip() for p in text_parts if p.strip())
-        if candidate_text:
+        if candidate_text := "\n".join(
+            p.strip() for p in text_parts if p.strip()
+        ):
             return candidate_text
     return ""
 
 
 def _fallback_positions(text: str) -> List[str]:
-    hits = re.findall(r"(?:position|role|title)\s*[:.-]\s*([^\n]+)", text, flags=re.IGNORECASE)
-    if hits:
+    if hits := re.findall(
+        r"(?:position|role|title)\s*[:.-]\s*([^\n]+)",
+        text,
+        flags=re.IGNORECASE,
+    ):
         return [h.strip() for h in hits][:3]
     headline = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    if headline:
-        return [headline[:80]]
-    return []
+    return [headline[:80]] if headline else []
 
 
 def _fallback_locations(text: str) -> List[str]:
     hits = re.findall(r"(?:location|based in|lives in)\s*[:.-]\s*([^\n,;]+)", text, flags=re.IGNORECASE)
-    results = [h.strip() for h in hits if h.strip()]
-    if results:
+    if results := [h.strip() for h in hits if h.strip()]:
         return results[:3]
     city_candidates = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", text)
     uniques: List[str] = []
@@ -312,7 +293,7 @@ def _fallback_salary(text: str) -> SalaryRange:
     salary_match = re.search(r"(\d[\d\s]{3,})", text)
     if not salary_match:
         return SalaryRange()
-    value = int(salary_match.group(1).replace(" ", ""))
+    value = int(salary_match[1].replace(" ", ""))
     return SalaryRange(minimum=value, maximum=None, currency="RUB")
 
 def reset_or_run(state: JobAgentState, config: RunnableConfig) -> str:
@@ -371,8 +352,7 @@ def extract_features_from_resume(resume_text: str, extractor_llm) -> Dict[str, A
     )
     try:
         response = extractor_llm.invoke(prompt)
-        parsed = parse_llm_response(response)
-        if parsed:
+        if parsed := parse_llm_response(response):
             parsed.setdefault("positions", [])
             parsed.setdefault("locations", [])
             parsed.setdefault("salary_range", {})
@@ -380,12 +360,11 @@ def extract_features_from_resume(resume_text: str, extractor_llm) -> Dict[str, A
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("LLM feature extraction failed: %s", exc)
 
-    fallback = {
+    return {
         "positions": _fallback_positions(resume_text),
         "locations": _fallback_locations(resume_text),
         "salary_range": _fallback_salary(resume_text).to_dict(),
     }
-    return fallback
 
 
 def capture_resume(state: JobAgentState, config: Optional[RunnableConfig] = None) -> JobAgentState:
@@ -456,16 +435,15 @@ def score_job(job: Dict[str, Any], resume_tokens: List[str], features: Dict[str,
         score += 0.4
 
     job_skills = [skill.lower() for skill in job.get("skills", []) if isinstance(skill, str)]
-    overlap = sum(1 for skill in job_skills if skill in resume_token_set)
+    overlap = sum(skill in resume_token_set
+              for skill in job_skills)
     score += overlap * 0.6
 
-    description_tokens = set(_tokenize(job.get("description") or ""))
-    if description_tokens:
+    if description_tokens := set(_tokenize(job.get("description") or "")):
         desc_overlap = len(description_tokens & resume_token_set)
         score += min(desc_overlap, 25) * 0.05
 
-    experience_tokens = set(_tokenize(job.get("experience") or ""))
-    if experience_tokens:
+    if experience_tokens := set(_tokenize(job.get("experience") or "")):
         exp_overlap = len(experience_tokens & resume_token_set)
         score += exp_overlap * 0.1
 
@@ -477,7 +455,7 @@ def rank_jobs(state: JobAgentState, config: Optional[RunnableConfig] = None) -> 
     jobs = state.get("job_candidates") or []
     resume_text = state.get("resume_text", "")
     features = state.get("extracted_features") or {}
-    resume_tokens = [token for token in _tokenize(resume_text)]
+    resume_tokens = list(_tokenize(resume_text))
 
     ranked: List[Dict[str, Any]] = []
     for job in jobs:
@@ -493,32 +471,58 @@ def respond_with_jobs(state: JobAgentState, config: Optional[RunnableConfig] = N
     jobs = state.get("ranked_jobs") or []
     features = state.get("extracted_features") or {}
 
-    if not jobs:
-        message = "Could not find suitable vacancies based on the resume. Please provide additional preferences."
-    else:
-        lines = ["Recommended vacancies:"]
-        for idx, job in enumerate(jobs, start=1):
-            salary = job.get("salary", {})
-            salary_str = ""
-            if salary.get("min") or salary.get("max"):
-                salary_str = (
-                    f" salary {salary.get('min', 'N/A')}-{salary.get('max', 'N/A')} "
-                    f"{salary.get('currency', 'RUB')}"
-                )
-            lines.append(
-                (
-                    f"{idx}. {job.get('title')} - {job.get('company')} ({job.get('location')})"
-                    f"{salary_str}. Link: {job.get('url')}. Score: {job.get('rank_score', 0):.2f}"
-                )
-            )
-        message = "\n".join(lines)
+    summary_lines: List[str] = []
+    positions = [p for p in features.get("positions", []) if isinstance(p, str) and p]
+    locations = [l for l in features.get("locations", []) if isinstance(l, str) and l]
+    salary_range = features.get("salary_range") or {}
 
-    summary = json.dumps(features, ensure_ascii=False)
-    final_text = (
-        "Candidate criteria:\n"
-        f"{summary}\n\n{message}"
-    )
-    return {"messages": [AIMessage(content=final_text)]}
+    if positions:
+        summary_lines.append("Желаемые позиции: " + ", ".join(positions))
+    if locations:
+        summary_lines.append("Регионы поиска: " + ", ".join(locations))
+    if salary_range.get("min") or salary_range.get("max"):
+        min_amount = salary_range.get("min")
+        max_amount = salary_range.get("max")
+        currency = salary_range.get("currency") or "RUB"
+        parts = []
+        if min_amount is not None:
+            parts.append(f"от {min_amount}")
+        if max_amount is not None:
+            parts.append(f"до {max_amount}")
+        summary_lines.append("Желаемая зарплата: " + " ".join(parts + [currency]))
+
+    if jobs:
+        summary_lines.append(f"Найдено {len(jobs)} подходящих вакансий. Выберите одну для подробностей.")
+    else:
+        summary_lines.append("Не удалось найти подходящие вакансии. Уточните предпочтения и попробуйте снова.")
+
+    payload = {
+        "summary": "\n".join(summary_lines),
+        "vacancies": [
+            {
+                "id": job.get("id"),
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "location": job.get("location"),
+                "url": job.get("url"),
+                "salary": job.get("salary"),
+                "skills": job.get("skills"),
+                "rank_score": job.get("rank_score"),
+                "match_score": job.get("match_score"),
+                "experience": job.get("experience"),
+                "source": job.get("source"),
+                "published_at": job.get("published_at"),
+                "search_position": job.get("search_position"),
+                "search_location": job.get("search_location"),
+                "description": job.get("description"),
+            }
+            for job in jobs
+            if isinstance(job, dict)
+        ],
+    }
+
+    return {"messages": [AIMessage(content=json.dumps(payload, ensure_ascii=False))]}
+
 
 
 

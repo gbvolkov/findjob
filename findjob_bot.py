@@ -5,17 +5,19 @@ Aiogram-based Telegram bot focused on job-search assistance.
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 # --- webhook imports (added) ---
 from aiohttp import web
@@ -53,6 +55,122 @@ WEBHOOK_PATH = getattr(config, "WEBHOOK_PATH", "/tg-webhook")
 WEBHOOK_URL = (WEBHOOK_BASE or "").rstrip("/") + WEBHOOK_PATH if WEBHOOK_BASE else None
 WEBHOOK_SECRET = getattr(config, "WEBHOOK_SECRET", None)
 
+
+
+def _truncate_label(text: str, limit: int = 64) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + '…'
+
+
+def build_vacancy_keyboard(vacancies: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    for idx, job in enumerate(vacancies):
+        title = (job.get('title') or 'Вакансия').strip()
+        company = (job.get('company') or '').strip()
+        label = f"{idx + 1}. {title}" if title else f"Вакансия #{idx + 1}"
+        if company:
+            label += f" — {company}"
+        rows.append([InlineKeyboardButton(text=_truncate_label(label), callback_data=f'job:{idx}')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_vacancy_actions_keyboard(index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text='Сформировать отклик', callback_data=f'vac:respond:{index}')],
+            [InlineKeyboardButton(text='Скрыть вакансию', callback_data=f'vac:reject:{index}')],
+            [InlineKeyboardButton(text='Сохранить', callback_data=f'vac:save:{index}')],
+        ]
+    )
+
+
+def format_salary(salary: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(salary, dict):
+        return 'не указана'
+    minimum = salary.get('min')
+    maximum = salary.get('max')
+    currency = salary.get('currency') or 'RUB'
+    if minimum is None and maximum is None:
+        return 'не указана'
+    if minimum is None:
+        return f"до {maximum} {currency}"
+    if maximum is None:
+        return f"от {minimum} {currency}"
+    if minimum == maximum:
+        return f"{minimum} {currency}"
+    return f"{minimum}-{maximum} {currency}"
+
+
+def format_vacancy_details(job: Dict[str, Any]) -> str:
+    title = job.get('title') or 'Без названия'
+    company = job.get('company')
+    location = job.get('location')
+    salary_str = format_salary(job.get('salary'))
+    published = job.get('published_at')
+    source = job.get('source')
+    experience = job.get('experience')
+    match_score = job.get('match_score') or job.get('rank_score')
+    description = job.get('description')
+    skills = [skill for skill in job.get('skills') or [] if isinstance(skill, str)]
+
+    parts: List[str] = [f'Вакансия: {title}']
+    if company:
+        parts.append(f'Компания: {company}')
+    if location:
+        parts.append(f'Локация: {location}')
+    parts.append(f'Зарплата: {salary_str}')
+    if experience:
+        parts.append(f'Опыт: {experience}')
+    if match_score is not None:
+        parts.append(f'Оценка соответствия: {match_score}')
+    if published:
+        parts.append(f'Опубликовано: {published}')
+    if source:
+        parts.append(f'Источник: {source}')
+    if skills:
+        parts.append('Навыки: ' + ', '.join(skills[:12]))
+    if description:
+        parts.append('Описание: ' + description)
+    url = job.get('url')
+    if url:
+        parts.append(f'Ссылка: {url}')
+    return '\n'.join(parts)
+
+
+def store_vacancy(thread: ThreadSettings, job: Dict[str, Any]) -> None:
+    job_id = job.get('id')
+    if job_id is not None:
+        for saved in thread.saved_jobs:
+            if isinstance(saved, dict) and saved.get('id') == job_id:
+                return
+    thread.saved_jobs.append(dict(job))
+
+
+def generate_response(job: Dict[str, Any]) -> str:
+    title = job.get('title') or 'Без названия'
+    company = job.get('company')
+    location = job.get('location')
+    experience = job.get('experience')
+    salary_str = format_salary(job.get('salary'))
+    skills = [skill for skill in job.get('skills') or [] if isinstance(skill, str)]
+    url = job.get('url')
+
+    lines = ['Черновик отклика для проверки:']
+    lines.append(f'Вакансия: {title}')
+    if company:
+        lines.append(f'Компания: {company}')
+    if location:
+        lines.append(f'Локация: {location}')
+    lines.append(f'Указанная зарплата: {salary_str}')
+    if experience:
+        lines.append(f'Требуемый опыт: {experience}')
+    if skills:
+        lines.append('Основные навыки: ' + ', '.join(skills[:10]))
+    if url:
+        lines.append(f'Ссылка: {url}')
+    lines.append('⚙️ Ответ собран заглушкой generate_response().')
+    return '\n'.join(lines)
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -85,8 +203,12 @@ async def main() -> None:
     dp.message.middleware(ThrottlingMiddleware(rate=3.0))
 
     @dp.errors()
-    async def global_error_handler(event, exception, **kwargs):
-        logging.exception("Unhandled exception occured: %s", exception)
+    async def global_error_handler(event: Any):
+        exc = getattr(event, 'exception', None)
+        if exc:
+            logging.exception('Unhandled exception occured', exc_info=(type(exc), exc, exc.__traceback__))
+        else:
+            logging.exception('Unhandled exception occured')
         return True
 
     def ensure_thread(message: types.Message) -> ThreadSettings:
@@ -183,6 +305,7 @@ async def main() -> None:
     async def handle_message(message: types.Message) -> None:
         chat_id = message.chat.id
         thread = ensure_thread(message)
+        thread.ranked_jobs = []
         placeholder: Optional[types.Message] = None
         typing_task: Optional[asyncio.Task] = None
 
@@ -306,7 +429,69 @@ async def main() -> None:
 
             try:
                 final_answer = await collect_final_text_from_stream(assistant, payload_msg, thread.get_config())
-                await finalize_placeholder_or_fallback(bot, placeholder, chat_id, final_answer)
+
+                parsed_payload = None
+                if final_answer:
+                    try:
+                        candidate = json.loads(final_answer)
+                        if isinstance(candidate, dict) and "vacancies" in candidate:
+                            parsed_payload = candidate
+                    except json.JSONDecodeError:
+                        parsed_payload = None
+
+                if parsed_payload:
+                    summary_text = parsed_payload.get("summary") or "Подбор вакансий завершён."
+                    vacancies = parsed_payload.get("vacancies") or []
+                    thread.ranked_jobs = [vac for vac in vacancies if isinstance(vac, dict)]
+                    await finalize_placeholder_or_fallback(bot, placeholder, chat_id, summary_text)
+                    if thread.ranked_jobs:
+                        keyboard = build_vacancy_keyboard(thread.ranked_jobs)
+                        if thread.vacancy_menu_message_id:
+                            try:
+                                await bot.edit_message_reply_markup(
+                                    chat_id=chat_id,
+                                    message_id=thread.vacancy_menu_message_id,
+                                    reply_markup=keyboard,
+                                )
+                            except Exception:
+                                msg = await bot.send_message(
+                                    chat_id,
+                                    "Выберите вакансию для подробностей:",
+                                    reply_markup=keyboard,
+                                    disable_web_page_preview=True,
+                                    parse_mode=None,
+                                )
+                                thread.vacancy_menu_message_id = msg.message_id
+                        else:
+                            msg = await bot.send_message(
+                                chat_id,
+                                "Выберите вакансию для подробностей:",
+                                reply_markup=keyboard,
+                                disable_web_page_preview=True,
+                                parse_mode=None,
+                            )
+                            thread.vacancy_menu_message_id = msg.message_id
+                    else:
+                        if thread.vacancy_menu_message_id:
+                            with contextlib.suppress(Exception):
+                                await bot.edit_message_text(
+                                    "Подходящих вакансий больше нет.",
+                                    chat_id=chat_id,
+                                    message_id=thread.vacancy_menu_message_id,
+                                    parse_mode=None,
+                                )
+                        thread.vacancy_menu_message_id = None
+                else:
+                    if thread.vacancy_menu_message_id:
+                        with contextlib.suppress(Exception):
+                            await bot.edit_message_text(
+                                "Подходящих вакансий больше нет.",
+                                chat_id=chat_id,
+                                message_id=thread.vacancy_menu_message_id,
+                                parse_mode=None,
+                            )
+                        thread.vacancy_menu_message_id = None
+                    await finalize_placeholder_or_fallback(bot, placeholder, chat_id, final_answer or "Ответ не получен.")
 
             except Exception:
                 logging.exception("Error while streaming/answering")
@@ -335,6 +520,152 @@ async def main() -> None:
                     )
                 else:
                     await bot.send_message(chat_id, "❌ Ошибка при обработке ответа", parse_mode=None)
+
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("job:"))
+    async def handle_job_callback(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        thread = chats.get(chat_id)
+        if not thread or not thread.ranked_jobs:
+            await call.answer("Список вакансий недоступен", show_alert=True)
+            return
+
+        try:
+            index = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            await call.answer()
+            return
+
+        if index < 0 or index >= len(thread.ranked_jobs):
+            await call.answer("Вакансия не найдена", show_alert=True)
+            return
+
+        job = thread.ranked_jobs[index]
+        details_text = format_vacancy_details(job)
+        actions_keyboard = build_vacancy_actions_keyboard(index)
+        await call.message.answer(
+            details_text,
+            disable_web_page_preview=True,
+            parse_mode=None,
+            reply_markup=actions_keyboard,
+        )
+        await call.answer()
+
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("vac:respond:"))
+    async def handle_vacancy_respond(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        thread = chats.get(chat_id)
+        if not thread or not thread.ranked_jobs:
+            await call.answer("Список вакансий недоступен", show_alert=True)
+            return
+
+        try:
+            index = int(call.data.split(":", 2)[2])
+        except (ValueError, IndexError):
+            await call.answer()
+            return
+
+        if index < 0 or index >= len(thread.ranked_jobs):
+            await call.answer("Вакансия не найдена", show_alert=True)
+            return
+
+        job = thread.ranked_jobs[index]
+        response_text = generate_response(job)
+        await call.message.answer(response_text, disable_web_page_preview=True, parse_mode=None)
+        await call.answer("Черновик отклика сформирован", show_alert=False)
+
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("vac:reject:"))
+    async def handle_vacancy_reject(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        thread = chats.get(chat_id)
+        if not thread or not thread.ranked_jobs:
+            await call.answer("Список вакансий недоступен", show_alert=True)
+            return
+
+        try:
+            index = int(call.data.split(":", 2)[2])
+        except (ValueError, IndexError):
+            await call.answer()
+            return
+
+        if index < 0 or index >= len(thread.ranked_jobs):
+            await call.answer("Вакансия не найдена", show_alert=True)
+            return
+
+        job = thread.ranked_jobs.pop(index)
+
+        with contextlib.suppress(Exception):
+            await call.message.edit_text(
+                "Вакансия скрыта и удалена из списка.",
+                parse_mode=None,
+                reply_markup=None,
+            )
+
+        if thread.ranked_jobs:
+            keyboard = build_vacancy_keyboard(thread.ranked_jobs)
+            if thread.vacancy_menu_message_id:
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=thread.vacancy_menu_message_id,
+                        reply_markup=keyboard,
+                    )
+                except Exception:
+                    msg = await bot.send_message(
+                        chat_id,
+                        "Выберите вакансию для подробностей:",
+                        reply_markup=keyboard,
+                        disable_web_page_preview=True,
+                        parse_mode=None,
+                    )
+                    thread.vacancy_menu_message_id = msg.message_id
+            else:
+                msg = await bot.send_message(
+                    chat_id,
+                    "Выберите вакансию для подробностей:",
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True,
+                    parse_mode=None,
+                )
+                thread.vacancy_menu_message_id = msg.message_id
+        else:
+            if thread.vacancy_menu_message_id:
+                with contextlib.suppress(Exception):
+                    await bot.edit_message_text(
+                        "Подходящих вакансий больше нет.",
+                        chat_id=chat_id,
+                        message_id=thread.vacancy_menu_message_id,
+                        parse_mode=None,
+                    )
+                thread.vacancy_menu_message_id = None
+
+        await call.answer("Вакансия скрыта", show_alert=False)
+
+
+    @dp.callback_query(lambda c: c.data and c.data.startswith("vac:save:"))
+    async def handle_vacancy_save(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
+        thread = chats.get(chat_id)
+        if not thread or not thread.ranked_jobs:
+            await call.answer("Список вакансий недоступен", show_alert=True)
+            return
+
+        try:
+            index = int(call.data.split(":", 2)[2])
+        except (ValueError, IndexError):
+            await call.answer()
+            return
+
+        if index < 0 or index >= len(thread.ranked_jobs):
+            await call.answer("Вакансия не найдена", show_alert=True)
+            return
+
+        job = thread.ranked_jobs[index]
+        store_vacancy(thread, job)
+        await call.answer("Вакансия сохранена", show_alert=False)
+        await call.message.answer("Вакансия сохранена для дальнейшей работы.", parse_mode=None)
 
     hook_mode = BOT_MODE in {"hook", "@hook@", "webhook"}
     if hook_mode:

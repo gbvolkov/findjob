@@ -1,6 +1,7 @@
 from agents.utils import ModelType
 from job_agent.find_job_agent import initialize_agent as initialize_job_agent
 from agents.state.state import ConfigSchema
+from typing import Any, Dict, List, Optional
 
 from user_manager.utils import UserManager
 from langchain_core.runnables import RunnableConfig
@@ -16,6 +17,9 @@ class ThreadSettings:
         self.user_id = user_id
         self.chat_id = chat_id
         self.role = ThreadSettings.user_man.get_role(user_id)
+        self.ranked_jobs: List[Dict[str, Any]] = []
+        self.saved_jobs: List[Dict[str, Any]] = []
+        self.vacancy_menu_message_id: Optional[int] = None
 
     def is_allowed(self) -> bool:
         return config.CHECK_RIGHTS.strip().lower() != 'true' or self.user_man.is_allowed(self.user_id)
