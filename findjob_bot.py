@@ -221,6 +221,123 @@ async def main() -> None:
         return thread
 
     # /start — resets AI agent's memory, greet
+    async def run_resume_search(
+        source_message: types.Message,
+        thread: ThreadSettings,
+        query: str,
+        image_payload: Optional[List[dict]] = None,
+    ) -> None:
+        chat_id = source_message.chat.id
+        placeholder: Optional[types.Message] = None
+        typing_task: Optional[asyncio.Task] = None
+        payload_parts: List[dict] = [{"type": "text", "text": query}]
+        if image_payload:
+            payload_parts.extend(image_payload)
+
+        assistant = thread.assistant
+
+        if not source_message.reply_to_message:
+            assistant.invoke(
+                {"messages": [HumanMessage(content=[{"type": "reset", "text": "RESET"}])]},
+                thread.get_config(),
+                stream_mode="values",
+            )
+
+        thread.ranked_jobs = []
+
+        placeholder = await source_message.reply("⌛ Обрабатываю запрос...", parse_mode=None)
+        typing_task = await start_show_typing(bot, chat_id, ChatAction.TYPING)
+
+        payload_msg = HumanMessage(content=payload_parts)
+
+        try:
+            final_answer = await collect_final_text_from_stream(assistant, payload_msg, thread.get_config())
+
+            parsed_payload = None
+            if final_answer:
+                try:
+                    candidate = json.loads(final_answer)
+                    if isinstance(candidate, dict) and "vacancies" in candidate:
+                        parsed_payload = candidate
+                except json.JSONDecodeError:
+                    parsed_payload = None
+
+            if parsed_payload:
+                summary_text = parsed_payload.get("summary") or "Подбор вакансий завершён."
+                vacancies = parsed_payload.get("vacancies") or []
+                thread.ranked_jobs = [vac for vac in vacancies if isinstance(vac, dict)]
+                await finalize_placeholder_or_fallback(bot, placeholder, chat_id, summary_text)
+                if thread.ranked_jobs:
+                    keyboard = build_vacancy_keyboard(thread.ranked_jobs)
+                    if thread.vacancy_menu_message_id:
+                        try:
+                            await bot.edit_message_reply_markup(
+                                chat_id=chat_id,
+                                message_id=thread.vacancy_menu_message_id,
+                                reply_markup=keyboard,
+                            )
+                        except Exception:
+                            msg = await bot.send_message(
+                                chat_id,
+                                "Выберите вакансию для подробностей:",
+                                reply_markup=keyboard,
+                                disable_web_page_preview=True,
+                                parse_mode=None,
+                            )
+                            thread.vacancy_menu_message_id = msg.message_id
+                    else:
+                        msg = await bot.send_message(
+                            chat_id,
+                            "Выберите вакансию для подробностей:",
+                            reply_markup=keyboard,
+                            disable_web_page_preview=True,
+                            parse_mode=None,
+                        )
+                        thread.vacancy_menu_message_id = msg.message_id
+                else:
+                    if thread.vacancy_menu_message_id:
+                        with contextlib.suppress(Exception):
+                            await bot.edit_message_text(
+                                "Подходящих вакансий больше нет.",
+                                chat_id=chat_id,
+                                message_id=thread.vacancy_menu_message_id,
+                                parse_mode=None,
+                            )
+                    thread.vacancy_menu_message_id = None
+            else:
+                if thread.vacancy_menu_message_id:
+                    with contextlib.suppress(Exception):
+                        await bot.edit_message_text(
+                            "Подходящих вакансий больше нет.",
+                            chat_id=chat_id,
+                            message_id=thread.vacancy_menu_message_id,
+                            parse_mode=None,
+                        )
+                thread.vacancy_menu_message_id = None
+                await finalize_placeholder_or_fallback(
+                    bot,
+                    placeholder,
+                    chat_id,
+                    final_answer or "Ответ не получен.",
+                )
+
+        except Exception:
+            logging.exception("Error while streaming/answering")
+            with contextlib.suppress(Exception):
+                if placeholder:
+                    await bot.edit_message_text(
+                        chat_id=placeholder.chat.id,
+                        message_id=placeholder.message_id,
+                        text="❌ Ошибка при обработке ответа",
+                    )
+                else:
+                    await bot.send_message(chat_id, "❌ Ошибка при обработке ответа", parse_mode=None)
+        finally:
+            if typing_task:
+                typing_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await typing_task
+
     @dp.message(Command("start"))
     async def cmd_start(message: types.Message) -> None:
         chat_id = message.chat.id
@@ -271,6 +388,28 @@ async def main() -> None:
         ensure_thread(message)
         await bot.send_message(message.chat.id, "Режим подбора вакансий активен. Пришлите резюме для анализа.", parse_mode=None)
 
+    @dp.message(Command("search"))
+    async def cmd_search(message: types.Message) -> None:
+        thread = ensure_thread(message)
+        if not thread.is_allowed():
+            await bot.send_message(
+                message.chat.id,
+                "К сожалению, мне не разрешено помогать вам. Пожалуйста, обратитесь к администратору бота.",
+                parse_mode=None,
+            )
+            return
+
+        resume_text = (thread.last_resume_text or "").strip()
+        if not resume_text:
+            await bot.send_message(
+                message.chat.id,
+                "Нет сохранённого резюме для повторного поиска. Отправьте резюме и попробуйте снова.",
+                parse_mode=None,
+            )
+            return
+
+        await run_resume_search(message, thread, resume_text)
+
     @dp.message(Command("reset"))
     async def cmd_reset(message: types.Message) -> None:
         chat_id = message.chat.id
@@ -306,8 +445,6 @@ async def main() -> None:
         chat_id = message.chat.id
         thread = ensure_thread(message)
         thread.ranked_jobs = []
-        placeholder: Optional[types.Message] = None
-        typing_task: Optional[asyncio.Task] = None
 
         if not thread.is_allowed():
             await bot.send_message(
@@ -315,6 +452,9 @@ async def main() -> None:
                 "К сожалению, мне не разрешено помогать вам. Пожалуйста, обратитесь к администратору бота.",
                 parse_mode=None,
             )
+            return
+
+        if message.text and message.text.startswith('/'):
             return
 
         image_payload: List[dict] = []
@@ -413,114 +553,17 @@ async def main() -> None:
                         with contextlib.suppress(asyncio.CancelledError):
                             await upload_task
 
-            assistant = thread.assistant
+            if query.strip():
+                text_message = (message.text or '').strip()
+                if not text_message.startswith('/'):
+                    thread.last_resume_text = query
 
-            if not message.reply_to_message:
-                assistant.invoke(
-                    {"messages": [HumanMessage(content=[{"type": "reset", "text": "RESET"}])]},
-                    thread.get_config(),
-                    stream_mode="values",
-                )
+            await run_resume_search(message, thread, query, image_payload)
 
-            placeholder = await message.reply("⌛ Обрабатываю запрос...", parse_mode=None)
-            typing_task = await start_show_typing(bot, chat_id, ChatAction.TYPING)
-
-            payload_msg = HumanMessage(content=[{"type": "text", "text": query}] + image_payload)
-
-            try:
-                final_answer = await collect_final_text_from_stream(assistant, payload_msg, thread.get_config())
-
-                parsed_payload = None
-                if final_answer:
-                    try:
-                        candidate = json.loads(final_answer)
-                        if isinstance(candidate, dict) and "vacancies" in candidate:
-                            parsed_payload = candidate
-                    except json.JSONDecodeError:
-                        parsed_payload = None
-
-                if parsed_payload:
-                    summary_text = parsed_payload.get("summary") or "Подбор вакансий завершён."
-                    vacancies = parsed_payload.get("vacancies") or []
-                    thread.ranked_jobs = [vac for vac in vacancies if isinstance(vac, dict)]
-                    await finalize_placeholder_or_fallback(bot, placeholder, chat_id, summary_text)
-                    if thread.ranked_jobs:
-                        keyboard = build_vacancy_keyboard(thread.ranked_jobs)
-                        if thread.vacancy_menu_message_id:
-                            try:
-                                await bot.edit_message_reply_markup(
-                                    chat_id=chat_id,
-                                    message_id=thread.vacancy_menu_message_id,
-                                    reply_markup=keyboard,
-                                )
-                            except Exception:
-                                msg = await bot.send_message(
-                                    chat_id,
-                                    "Выберите вакансию для подробностей:",
-                                    reply_markup=keyboard,
-                                    disable_web_page_preview=True,
-                                    parse_mode=None,
-                                )
-                                thread.vacancy_menu_message_id = msg.message_id
-                        else:
-                            msg = await bot.send_message(
-                                chat_id,
-                                "Выберите вакансию для подробностей:",
-                                reply_markup=keyboard,
-                                disable_web_page_preview=True,
-                                parse_mode=None,
-                            )
-                            thread.vacancy_menu_message_id = msg.message_id
-                    else:
-                        if thread.vacancy_menu_message_id:
-                            with contextlib.suppress(Exception):
-                                await bot.edit_message_text(
-                                    "Подходящих вакансий больше нет.",
-                                    chat_id=chat_id,
-                                    message_id=thread.vacancy_menu_message_id,
-                                    parse_mode=None,
-                                )
-                        thread.vacancy_menu_message_id = None
-                else:
-                    if thread.vacancy_menu_message_id:
-                        with contextlib.suppress(Exception):
-                            await bot.edit_message_text(
-                                "Подходящих вакансий больше нет.",
-                                chat_id=chat_id,
-                                message_id=thread.vacancy_menu_message_id,
-                                parse_mode=None,
-                            )
-                        thread.vacancy_menu_message_id = None
-                    await finalize_placeholder_or_fallback(bot, placeholder, chat_id, final_answer or "Ответ не получен.")
-
-            except Exception:
-                logging.exception("Error while streaming/answering")
-                with contextlib.suppress(Exception):
-                    if placeholder:
-                        await bot.edit_message_text(
-                            chat_id=placeholder.chat.id,
-                            message_id=placeholder.message_id,
-                            text="❌ Ошибка при обработке ответа",
-                        )
-                    else:
-                        await bot.send_message(chat_id, "❌ Ошибка при обработке ответа", parse_mode=None)
-            finally:
-                if typing_task:
-                    typing_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await typing_task
         except Exception:
             logging.exception("Unexpected error in handle_message")
             with contextlib.suppress(Exception):
-                if placeholder:
-                    await bot.edit_message_text(
-                        chat_id=placeholder.chat.id,
-                        message_id=placeholder.message_id,
-                        text="❌ Ошибка при обработке ответа",
-                    )
-                else:
-                    await bot.send_message(chat_id, "❌ Ошибка при обработке ответа", parse_mode=None)
-
+                await bot.send_message(chat_id, "❌ Ошибка при обработке ответа", parse_mode=None)
 
     @dp.callback_query(lambda c: c.data and c.data.startswith("job:"))
     async def handle_job_callback(call: types.CallbackQuery):

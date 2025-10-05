@@ -163,6 +163,7 @@ class VacancyEmbeddingReranker:
             ranked.append(item)
 
         ranked.sort(key=lambda entry: entry["final_rank_score"], reverse=True)
+        #ranked.sort(key=lambda entry: entry["reranker_score"], reverse=True)
 
         if limit is not None:
             ranked = ranked[:limit]

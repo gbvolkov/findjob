@@ -19,6 +19,7 @@ class ThreadSettings:
         self.role = ThreadSettings.user_man.get_role(user_id)
         self.ranked_jobs: List[Dict[str, Any]] = []
         self.saved_jobs: List[Dict[str, Any]] = []
+        self.last_resume_text: Optional[str] = None
         self.vacancy_menu_message_id: Optional[int] = None
 
     def is_allowed(self) -> bool:

@@ -140,43 +140,56 @@ def _resolve_area_ids(locations: List[str]) -> Dict[str, Optional[str]]:
     return resolved
 
 
+USE_RERANK_EMB = True
+from job_agent.rerankers import VacancyEmbeddingReranker
+
 def _rerank_vacancies(vacancies: List[Dict[str, Any]], features: Dict[str, Any], resume_text: str) -> List[Dict[str, Any]]: 
-    resume_tokens = set(_tokenize(resume_text)) 
-    position_terms = [set(_tokenize(pos)) for pos in features.get("positions", []) if isinstance(pos, str) and pos] 
-    def score(job: Dict[str, Any]) -> float: 
-        base_score = job.get("match_score") or 0.0 
-        try: 
-            score_value = float(base_score) 
-        except (TypeError, ValueError): 
-            score_value = 0.0 
-        title_tokens = set(_tokenize(job.get("title") or "")) 
-        for tokens in position_terms: 
-            if not tokens: 
-                continue 
-            if tokens.issubset(title_tokens): 
-                score_value += 3.0 
-            else: 
-                overlap = len(tokens & title_tokens) 
-                if overlap: 
-                    score_value += 1.5 * (overlap / len(tokens)) 
-        skills = [s.lower() for s in job.get("skills", []) if isinstance(s, str)] 
-        if skills and resume_tokens: 
-            skill_hits = sum(s in resume_tokens
-                         for s in skills) 
-            score_value += skill_hits * 1.2 
-        description_tokens = set(_tokenize(job.get("description") or "")) 
-        if description_tokens and resume_tokens: 
-            overlap_desc = len(description_tokens & resume_tokens) 
-            score_value += min(overlap_desc, 30) * 0.08 
-        experience_tokens = set(_tokenize(job.get("experience") or "")) 
-        if experience_tokens and resume_tokens: 
-            exp_overlap = len(experience_tokens & resume_tokens) 
-            score_value += exp_overlap * 0.2 
-        return round(score_value, 4) 
-    for job in vacancies: 
-        job["rank_score"] = score(job) 
-    vacancies.sort(key=lambda job: job.get("rank_score", 0.0), reverse=True) 
-    return vacancies
+    if USE_RERANK_EMB:
+        reranker = VacancyEmbeddingReranker()
+        return reranker.rerank(
+            vacancies,
+            resume_text="Experienced Python developer with ML background and FastAPI expertise.",
+            features=features,
+            use_cross_encoder=True,
+            top_k = 5
+        )
+    else:
+        resume_tokens = set(_tokenize(resume_text)) 
+        position_terms = [set(_tokenize(pos)) for pos in features.get("positions", []) if isinstance(pos, str) and pos] 
+        def score(job: Dict[str, Any]) -> float: 
+            base_score = job.get("match_score") or 0.0 
+            try: 
+                score_value = float(base_score) 
+            except (TypeError, ValueError): 
+                score_value = 0.0 
+            title_tokens = set(_tokenize(job.get("title") or "")) 
+            for tokens in position_terms: 
+                if not tokens: 
+                    continue 
+                if tokens.issubset(title_tokens): 
+                    score_value += 3.0 
+                else: 
+                    overlap = len(tokens & title_tokens) 
+                    if overlap: 
+                        score_value += 1.5 * (overlap / len(tokens)) 
+            skills = [s.lower() for s in job.get("skills", []) if isinstance(s, str)] 
+            if skills and resume_tokens: 
+                skill_hits = sum(s in resume_tokens
+                            for s in skills) 
+                score_value += skill_hits * 1.2 
+            description_tokens = set(_tokenize(job.get("description") or "")) 
+            if description_tokens and resume_tokens: 
+                overlap_desc = len(description_tokens & resume_tokens) 
+                score_value += min(overlap_desc, 30) * 0.08 
+            experience_tokens = set(_tokenize(job.get("experience") or "")) 
+            if experience_tokens and resume_tokens: 
+                exp_overlap = len(experience_tokens & resume_tokens) 
+                score_value += exp_overlap * 0.2 
+            return round(score_value, 4) 
+        for job in vacancies: 
+            job["rank_score"] = score(job) 
+        vacancies.sort(key=lambda job: job.get("rank_score", 0.0), reverse=True) 
+        return vacancies
 
 
 def hh_search_vacancies(
@@ -399,17 +412,22 @@ def build_job_lookup_node(fetch_jobs_fn):
     return job_lookup
 
 
+#USE_SEMANTIC_SCORE = True
+from job_agent.scorers.semantic_job_scorer import semantic_score_job, SemanticScoreWeights
+
 def score_job(job: Dict[str, Any], resume_tokens: List[str], features: Dict[str, Any]) -> float:
-    base_score = job.get("rank_score", job.get("match_score", 0.0))
+    heuristic_score = job.get("rank_score", job.get("match_score", 0.0))
     try:
-        score = float(base_score)
+        score = float(heuristic_score)
     except (TypeError, ValueError):
         score = 0.0
 
     resume_token_set = set(resume_tokens)
 
     title_tokens = set(_tokenize(job.get("title") or ""))
-    candidate_positions = [set(_tokenize(p)) for p in features.get("positions", []) if isinstance(p, str)]
+    candidate_positions = [
+        set(_tokenize(p)) for p in features.get("positions", []) if isinstance(p, str)
+    ]
     for tokens in candidate_positions:
         if not tokens:
             continue
@@ -435,17 +453,24 @@ def score_job(job: Dict[str, Any], resume_tokens: List[str], features: Dict[str,
         score += 0.4
 
     job_skills = [skill.lower() for skill in job.get("skills", []) if isinstance(skill, str)]
-    overlap = sum(skill in resume_token_set
-              for skill in job_skills)
+    overlap = sum(skill in resume_token_set for skill in job_skills)
     score += overlap * 0.6
 
-    if description_tokens := set(_tokenize(job.get("description") or "")):
-        desc_overlap = len(description_tokens & resume_token_set)
-        score += min(desc_overlap, 25) * 0.05
-
-    if experience_tokens := set(_tokenize(job.get("experience") or "")):
-        exp_overlap = len(experience_tokens & resume_token_set)
-        score += exp_overlap * 0.1
+    resume_text_value = " ".join(resume_tokens).strip()
+    if resume_text_value:
+        # Push more weight to description/experience in the semantic scorer.
+        semantic_score = semantic_score_job(
+            job=job,
+            resume_text=resume_text_value,
+            features=features,
+            weights=SemanticScoreWeights(
+                title_position=0.2,
+                skills_resume=0.15,
+                description_resume=0.4,
+                experience_resume=0.25,
+            ),
+        )
+        score = 0.4 * score + 0.6 * float(semantic_score)
 
     return round(score, 3)
 
