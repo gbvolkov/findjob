@@ -70,3 +70,5 @@ chardet
 playwright
 natasha
 transliterate
+fastapi
+uvicorn
