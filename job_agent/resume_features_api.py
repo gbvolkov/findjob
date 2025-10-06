@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from agents.llm_utils import get_llm
-from job_agent.find_job_agent import extract_features_from_resume
+from job_agent.feature_extractor import extract_features_from_resume
 
 logger = logging.getLogger(__name__)
 

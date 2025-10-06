@@ -23,6 +23,7 @@ from utils.llm_logger import JSONFileTracer
 import config
 from hh_search import search_vacancies, resolve_area_id
 
+from job_agent.feature_extractor import extract_features_from_resume
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +35,6 @@ class JobAgentState(TypedDict, total=False):
     job_candidates: List[Dict[str, Any]]
     ranked_jobs: List[Dict[str, Any]]
 
-
-@dataclass
-class SalaryRange:
-    minimum: Optional[int] = None
-    maximum: Optional[int] = None
-    currency: str = "RUB"
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "min": self.minimum,
-            "max": self.maximum,
-            "currency": self.currency,
-        }
 
 DEFAULT_QUERY_PER_PAGE = 20
 MAX_POSITION_QUERIES = 7
@@ -277,56 +265,6 @@ def _read_resume_text(state: JobAgentState) -> str:
     return ""
 
 
-def _fallback_positions(text: str) -> List[str]:
-    if hits := re.findall(
-        r"(?:position|role|title)\s*[:.-]\s*([^\n]+)",
-        text,
-        flags=re.IGNORECASE,
-    ):
-        return [h.strip() for h in hits][:3]
-    headline = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    return [headline[:80]] if headline else []
-
-
-def _fallback_locations(text: str) -> List[str]:
-    hits = re.findall(r"(?:location|based in|lives in)\s*[:.-]\s*([^\n,;]+)", text, flags=re.IGNORECASE)
-    if results := [h.strip() for h in hits if h.strip()]:
-        return results[:3]
-    city_candidates = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", text)
-    uniques: List[str] = []
-    for candidate in city_candidates:
-        if candidate not in uniques:
-            uniques.append(candidate)
-        if len(uniques) == 3:
-            break
-    return uniques
-
-def _fallback_skills(text: str) -> List[str]:
-    if hits := re.findall(
-        r"(?:skill|ability|experienced in)\s*[:.-]\s*([^\n]+)",
-        text,
-        flags=re.IGNORECASE,
-    ):
-        return [h.strip() for h in hits][:3]
-    headline = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    return [headline[:80]] if headline else []
-
-def _fallback_competencies(text: str) -> List[str]:
-    if hits := re.findall(
-        r"(?:competence)\s*[:.-]\s*([^\n]+)",
-        text,
-        flags=re.IGNORECASE,
-    ):
-        return [h.strip() for h in hits][:3]
-    headline = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    return [headline[:80]] if headline else []
-
-def _fallback_salary(text: str) -> SalaryRange:
-    salary_match = re.search(r"(\d[\d\s]{3,})", text)
-    if not salary_match:
-        return SalaryRange()
-    value = int(salary_match[1].replace(" ", ""))
-    return SalaryRange(minimum=value, maximum=None, currency="RUB")
 
 def reset_or_run(state: JobAgentState, config: RunnableConfig) -> str:
     if state["messages"][-1].content[0].get("type") == "reset":
@@ -349,60 +287,6 @@ def user_info(state: JobAgentState, config: RunnableConfig):
     user_id = configuration.get("user_id", None)
     user_role = configuration.get("user_role", "default")
     return {"user_info": {"user_id": user_id, "user_role": user_role}}
-
-def parse_llm_response(raw: Any) -> Optional[Dict[str, Any]]:
-    if isinstance(raw, str):
-        payload = raw
-    else:
-        payload = getattr(raw, "content", raw)
-        if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-            payload = payload[0].get("text")
-    if not isinstance(payload, str):
-        return None
-    payload = payload.strip()
-    try:
-        return json.loads(payload)
-    except json.JSONDecodeError:
-        if "{" in payload:
-            candidate = payload[payload.index("{"):]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                logger.debug("Failed to parse JSON from payload: %s", payload)
-        return None
-
-
-def extract_features_from_resume(resume_text: str, extractor_llm) -> Dict[str, Any]:
-    prompt = (
-        "You analyse resumes and must extract key search criteria.\n"
-        "Return ONLY valid JSON with the following keys:\n"
-        "- positions: list[str]\n"
-        "- locations: list[str]\n"
-        "- skills: list[str]\n"
-        "- competencies: list[str]\n"
-        "- salary_range: object with optional min, max, currency numbers (RUB by default).\n"
-        "If information is missing, use an empty list or null values.\n"
-        f"Resume:\n{resume_text}\n"
-    )
-    try:
-        response = extractor_llm.invoke(prompt)
-        if parsed := parse_llm_response(response):
-            parsed.setdefault("positions", [])
-            parsed.setdefault("locations", [])
-            parsed.setdefault("skills", [])
-            parsed.setdefault("competencies", [])
-            parsed.setdefault("salary_range", {})
-            return parsed
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("LLM feature extraction failed: %s", exc)
-
-    return {
-        "positions": _fallback_positions(resume_text),
-        "locations": _fallback_locations(resume_text),
-        "skills": _fallback_skills(resume_text),
-        "competencies": _fallback_competencies(resume_text),
-        "salary_range": _fallback_salary(resume_text).to_dict(),
-    }
 
 
 def capture_resume(state: JobAgentState, config: Optional[RunnableConfig] = None) -> JobAgentState:
@@ -572,8 +456,6 @@ def respond_with_jobs(state: JobAgentState, config: Optional[RunnableConfig] = N
     }
 
     return {"messages": [AIMessage(content=json.dumps(payload, ensure_ascii=False))]}
-
-
 
 
 def initialize_agent(
