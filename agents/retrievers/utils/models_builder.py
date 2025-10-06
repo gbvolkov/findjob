@@ -21,6 +21,7 @@ def getEmbeddingModel()-> HuggingFaceEmbeddings:
         logging.info(f"loading model for embedding:  {config.EMBEDDING_MODEL}")
         _embedding_model = HuggingFaceEmbeddings(
             model_name=config.EMBEDDING_MODEL,
+            model_kwargs={"device": _device}, 
             encode_kwargs={"normalize_embeddings": True}
         )
     return _embedding_model
