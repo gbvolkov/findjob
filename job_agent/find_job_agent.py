@@ -301,6 +301,16 @@ def _fallback_locations(text: str) -> List[str]:
             break
     return uniques
 
+def _fallback_skills(text: str) -> List[str]:
+    if hits := re.findall(
+        r"(?:skill|ability|experienced in)\s*[:.-]\s*([^\n]+)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return [h.strip() for h in hits][:3]
+    headline = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return [headline[:80]] if headline else []
+
 
 def _fallback_salary(text: str) -> SalaryRange:
     salary_match = re.search(r"(\d[\d\s]{3,})", text)
@@ -359,6 +369,7 @@ def extract_features_from_resume(resume_text: str, extractor_llm) -> Dict[str, A
         "Return ONLY valid JSON with the following keys:\n"
         "- positions: list[str]\n"
         "- locations: list[str]\n"
+        "- skills: list[str]\n"
         "- salary_range: object with optional min, max, currency numbers (RUB by default).\n"
         "If information is missing, use an empty list or null values.\n"
         f"Resume:\n{resume_text}\n"
@@ -368,6 +379,7 @@ def extract_features_from_resume(resume_text: str, extractor_llm) -> Dict[str, A
         if parsed := parse_llm_response(response):
             parsed.setdefault("positions", [])
             parsed.setdefault("locations", [])
+            parsed.setdefault("skills", [])
             parsed.setdefault("salary_range", {})
             return parsed
     except Exception as exc:  # pragma: no cover - defensive
@@ -376,6 +388,7 @@ def extract_features_from_resume(resume_text: str, extractor_llm) -> Dict[str, A
     return {
         "positions": _fallback_positions(resume_text),
         "locations": _fallback_locations(resume_text),
+        "skills": _fallback_skills(resume_text),
         "salary_range": _fallback_salary(resume_text).to_dict(),
     }
 

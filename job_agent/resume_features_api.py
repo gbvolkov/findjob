@@ -34,6 +34,7 @@ class ResumeFeaturesResponse(BaseModel):
 
     positions: List[str]
     locations: List[str]
+    skills: List[str]
     salary_range: SalaryRangeResponse
 
 
@@ -52,6 +53,7 @@ def _normalise_features(raw_features: Dict[str, Any]) -> ResumeFeaturesResponse:
 
     positions = [p for p in raw_features.get("positions", []) if isinstance(p, str)]
     locations = [l for l in raw_features.get("locations", []) if isinstance(l, str)]
+    skills = [l for l in raw_features.get("skills", []) if isinstance(l, str)]
 
     salary_payload = raw_features.get("salary_range") or {}
     if not isinstance(salary_payload, dict):
@@ -63,7 +65,7 @@ def _normalise_features(raw_features: Dict[str, Any]) -> ResumeFeaturesResponse:
         currency=salary_payload.get("currency") or "RUB",
     )
 
-    return ResumeFeaturesResponse(positions=positions, locations=locations, salary_range=salary)
+    return ResumeFeaturesResponse(positions=positions, locations=locations, skills=skills, salary_range=salary)
 
 
 @app.post("/resume/features", response_model=ResumeFeaturesResponse)
