@@ -9,7 +9,8 @@ from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
 import config
 
-_device = "cuda" if torch.cuda.is_available() else "cpu"
+
+_device = "cuda" if (config.FORCE_CPU != "1") and torch.cuda.is_available() else "cpu"
 
 _embedding_model: Optional[HuggingFaceEmbeddings] = None
 _reranker_model: Optional[HuggingFaceCrossEncoder] = None
