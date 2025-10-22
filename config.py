@@ -105,3 +105,7 @@ LANGFUSE_PUBLIC=os.environ.get('LANGFUSE_PUBLIC', "")
 LANGFUSE_URL=os.environ.get('LANGFUSE_URL', "")
 
 FORCE_CPU = os.environ.get("FORCE_CPU", "1")
+
+CLIENT_ID = os.environ.get("CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
+HH_TOKEN_URL = os.environ.get("HH_TOKEN_URL", "")

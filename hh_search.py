@@ -12,9 +12,12 @@ from urllib.request import urlopen
 
 import requests
 
+import config
+
 from transliterate import translit
 from natasha import MorphVocab
 import pymorphy2
+
 
 def _transliterate_latin_to_cyrillic(text: str) -> str:
     """Transliterate Latin names to Cyrillic using transliterate library."""
@@ -50,6 +53,37 @@ HEADERS = {
 
 
 
+def get_token()-> str:
+    """
+    Request an application access_token via OAuth2 client credentials.
+    Reissuing sooner than 5 minutes is avoided to prevent revoking the current token.
+    """
+    data = {
+        "grant_type": "authorization_code",  # standard OAuth2 for app token
+        "client_id": config.CLIENT_ID,
+        "client_secret": config.CLIENT_SECRET,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    resp = requests.post(config.HH_TOKEN_URL, data=data, headers=headers, timeout=20)
+    if resp.status_code == 200:
+        payload = resp.json()
+        return payload["access_token"]
+
+    # Helpful errors
+    if resp.status_code == 400:
+        raise RuntimeError(
+            f"Bad request to HH token endpoint (400). "
+            f"Check grant_type/client_id/client_secret formatting. Response: {resp.text}"
+        )
+    if resp.status_code == 403:
+        raise RuntimeError(
+            f"Forbidden (403). The app may not be allowed to get a token. Response: {resp.text}"
+        )
+
+    resp.raise_for_status()
+
+OAUTH_TOKEN = get_token()
 
 
 def _normalize_region_name(region_name: str) -> str:
@@ -86,8 +120,7 @@ def _normalize_region_name(region_name: str) -> str:
     morph_vocab = _get_morph_vocab()
     lemmas = []
     for token in tokens:
-        parsed = morph.parse(token)
-        if parsed:
+        if parsed := morph.parse(token):
             lemma = parsed[0].normal_form
             lemmas.append(lemma)
     if lemmas:
