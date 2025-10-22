@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from webchat.agent_runtime import agent_manager
+from webchat.formatting import format_agent_response
 from webchat.models import Dialog
 from webchat.storage import EXPORT_DIR, storage
 
@@ -144,7 +145,22 @@ async def _generate_bot_message(
     except Exception:
         response_text = "Произошла ошибка при обращении к интеллектуальному помощнику. Попробуйте позже."
 
-    bot_message = storage.add_message(dialog.id, "bot", response_text)
+    formatted_content = response_text.strip()
+
+    if response_text:
+        try:
+            candidate = json.loads(response_text)
+        except json.JSONDecodeError:
+            candidate = None
+        if isinstance(candidate, dict):
+            formatted = format_agent_response(candidate)
+            if formatted:
+                formatted_content = formatted
+
+    if not formatted_content:
+        formatted_content = "Ответ не получен."
+
+    bot_message = storage.add_message(dialog.id, "bot", formatted_content)
     return bot_message.to_dict()
 
 
