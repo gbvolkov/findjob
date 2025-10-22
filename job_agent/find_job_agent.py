@@ -136,7 +136,7 @@ def _rerank_vacancies(vacancies: List[Dict[str, Any]], features: Dict[str, Any],
         reranker = VacancyEmbeddingReranker()
         return reranker.rerank(
             vacancies,
-            resume_text="Experienced Python developer with ML background and FastAPI expertise.",
+            resume_text=resume_text,
             features=features,
             use_cross_encoder=True,
             top_k = 5

@@ -21,9 +21,11 @@ def getEmbeddingModel()-> HuggingFaceEmbeddings:
         logging.info(f"loading model for embedding:  {config.EMBEDDING_MODEL}")
         model_kwargs = {"device": _device}
         if _device == "cpu":
-            # Ensure weights are loaded directly on CPU instead of meta tensors
-            model_kwargs["low_cpu_mem_usage"] = False
-
+            # Force transformer loader to materialize weights on CPU instead of meta tensors
+            model_kwargs["model_kwargs"] = {
+                "low_cpu_mem_usage": False,
+                "device_map": None,
+            }
         _embedding_model = HuggingFaceEmbeddings(
             model_name=config.EMBEDDING_MODEL,
             model_kwargs=model_kwargs,
