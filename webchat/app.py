@@ -19,8 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import Dialog
-from .storage import EXPORT_DIR, storage
+try:  # pragma: no cover - import fallback for script execution
+    from .models import Dialog  # type: ignore[attr-defined]
+    from .storage import EXPORT_DIR, storage  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover
+    # Allow running ``python webchat/app.py`` without installing as a package.
+    from models import Dialog  # type: ignore[attr-defined]
+    from storage import EXPORT_DIR, storage  # type: ignore[attr-defined]
 
 app = FastAPI(title="Job Search Web Chat")
 
