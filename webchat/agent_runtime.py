@@ -6,7 +6,7 @@ from typing import Dict, List
 
 from agents.state.state import ConfigSchema
 from agents.utils import ModelType
-from job_agent.find_job_agent import initialize_agent as initialize_job_agent
+from job_agent.find_job_agent import initialize_agent
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
