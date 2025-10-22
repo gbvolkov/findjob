@@ -38,7 +38,7 @@ def format_vacancy(job: Dict[str, Any], index: int | None = None) -> str:
     published_at = _truncate(job.get("published_at"))
     url = _truncate(job.get("url"))
     description = _truncate(job.get("description"))
-    match_score = job.get("match_score")
+    match_score = job.get("final_rank_score")
     rank_score = job.get("rank_score")
 
     skills = [
