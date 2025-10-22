@@ -83,7 +83,7 @@ def get_token()-> str:
 
     resp.raise_for_status()
 
-OAUTH_TOKEN = get_token()
+#OAUTH_TOKEN = get_token()
 
 
 def _normalize_region_name(region_name: str) -> str:
