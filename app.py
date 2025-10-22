@@ -26,6 +26,9 @@ from webchat.formatting import format_agent_response
 from webchat.models import Dialog
 from webchat.storage import EXPORT_DIR, storage
 
+import logging
+
+
 app = FastAPI(title="Job Search Web Chat")
 
 app.add_middleware(
@@ -130,9 +133,10 @@ async def _generate_bot_message(
             extracted_text = await asyncio.to_thread(
                 alioty,
                 Path(chat_file.path),
-                chat_file.content_type,
+                mime_type = chat_file.content_type,
             )
-        except Exception:
+        except Exception as e:
+            logging.warning("Failed to extract text from file", exc_info=e, extra={"file": str(chat_file)})
             extracted_text = ""
         extracted_text = (extracted_text or "").strip()
         header = f"[Файл {chat_file.filename}]"

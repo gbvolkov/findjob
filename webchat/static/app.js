@@ -277,7 +277,11 @@ async function startTaskDialog(task) {
   await loadHistory();
   await openDialog(dialog.id);
   const promptText = `Задача: ${task.title}\n${task.description}`;
-  await sendMessage(promptText);
+  const textarea = document.getElementById("message-input");
+  if (textarea) {
+    textarea.value = promptText;
+    textarea.focus();
+  }
 }
 
 async function uploadAttachment(dialogId, fileInput) {
