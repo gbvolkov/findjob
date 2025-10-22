@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Search Web Chat</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="history-panel">
+        <header>
+          <h1>История диалогов</h1>
+          <div class="history-actions">
+            <input type="search" id="history-search" placeholder="Поиск по истории" />
+            <button id="history-search-btn">Найти</button>
+          </div>
+        </header>
+        <div id="history-list" class="history-list"></div>
+      </aside>
+      <main class="chat-panel">
+        <section class="chat-header">
+          <div>
+            <h2 id="dialog-title">Выберите диалог</h2>
+            <p id="dialog-meta"></p>
+          </div>
+          <div class="chat-actions">
+            <button id="new-dialog">Новый диалог</button>
+            <button id="export-dialog" disabled>Экспорт</button>
+            <button id="delete-dialog" disabled>Удалить</button>
+          </div>
+        </section>
+        <section id="chat-window" class="chat-window"></section>
+        <section class="chat-input">
+          <form id="message-form">
+            <textarea id="message-input" rows="3" placeholder="Введите сообщение"></textarea>
+            <div class="input-actions">
+              <input type="file" id="file-input" accept="text/plain" />
+              <button type="submit">Отправить</button>
+            </div>
+          </form>
+        </section>
+      </main>
+      <aside class="tasks-panel">
+        <header>
+          <h1>Библиотека задач</h1>
+          <div class="tasks-filters">
+            <select id="tasks-category"></select>
+            <input type="search" id="tasks-search" placeholder="Поиск по задачам" />
+            <button id="tasks-search-btn">Найти</button>
+          </div>
+        </header>
+        <div id="tasks-list" class="tasks-list"></div>
+      </aside>
+    </div>
+    <template id="message-template">
+      <div class="message">
+        <div class="message-header">
+          <span class="sender"></span>
+          <span class="timestamp"></span>
+        </div>
+        <div class="message-content"></div>
+        <div class="attachments"></div>
+      </div>
+    </template>
+    <template id="history-card-template">
+      <article class="history-card">
+        <h3></h3>
+        <p class="history-preview"></p>
+        <footer>
+          <span class="history-bot"></span>
+          <span class="history-updated"></span>
+        </footer>
+        <div class="history-card-actions">
+          <button class="history-open">Открыть</button>
+          <button class="history-export">Экспорт</button>
+          <button class="history-delete">Удалить</button>
+        </div>
+      </article>
+    </template>
+    <template id="task-card-template">
+      <article class="task-card">
+        <h3></h3>
+        <p class="task-category"></p>
+        <p class="task-description"></p>
+      </article>
+    </template>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
