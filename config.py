@@ -109,3 +109,29 @@ FORCE_CPU = os.environ.get("FORCE_CPU", "1")
 CLIENT_ID = os.environ.get("CLIENT_ID", "")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
 HH_TOKEN_URL = os.environ.get("HH_TOKEN_URL", "")
+
+def _split_env_list(value):
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+_WEBCHAT_DEFAULT_TYPES = [
+    "text/plain",
+    "text/markdown",
+    "application/markdown",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]
+
+_WEBCHAT_DEFAULT_EXTENSIONS = [
+    ".txt",
+    ".md",
+    ".markdown",
+    ".pdf",
+    ".doc",
+    ".docx",
+]
+
+WEBCHAT_ALLOWED_FILE_TYPES = _split_env_list(os.environ.get("WEBCHAT_ALLOWED_FILE_TYPES")) or _WEBCHAT_DEFAULT_TYPES
+WEBCHAT_ALLOWED_FILE_EXTENSIONS = _split_env_list(os.environ.get("WEBCHAT_ALLOWED_FILE_EXTENSIONS")) or _WEBCHAT_DEFAULT_EXTENSIONS

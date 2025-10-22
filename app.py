@@ -19,6 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+import config
+from alioty import alioty
 from webchat.agent_runtime import agent_manager
 from webchat.formatting import format_agent_response
 from webchat.models import Dialog
@@ -63,7 +65,11 @@ def index() -> str:
 
 @app.get("/api/session")
 def get_session(user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
-    return {"user": user}
+    return {
+        "user": user,
+        "allowed_file_types": list(getattr(config, "WEBCHAT_ALLOWED_FILE_TYPES", [])),
+        "allowed_file_extensions": list(getattr(config, "WEBCHAT_ALLOWED_FILE_EXTENSIONS", [])),
+    }
 
 
 @app.get("/api/dialogs")
@@ -121,15 +127,20 @@ async def _generate_bot_message(
         if not chat_file:
             continue
         try:
-            file_text = await asyncio.to_thread(
-                Path(chat_file.path).read_text, encoding="utf-8", errors="ignore"
+            extracted_text = await asyncio.to_thread(
+                alioty,
+                Path(chat_file.path),
+                chat_file.content_type,
             )
         except Exception:
-            file_text = ""
+            extracted_text = ""
+        extracted_text = (extracted_text or "").strip()
+        header = f"[Файл {chat_file.filename}]"
+        payload_text = header if not extracted_text else f"{header}\n{extracted_text}"
         attachments_payload.append(
             {
                 "type": "text",
-                "text": f"[Файл {chat_file.filename}]\n{file_text.strip()}",
+                "text": payload_text,
             }
         )
 
@@ -185,8 +196,16 @@ async def upload_file(dialog_id: str, uploaded_file: UploadFile = File(...), use
     dialog = storage.get_dialog(dialog_id)
     if not dialog:
         raise HTTPException(status_code=404, detail="Диалог не найден")
-    if not uploaded_file.content_type.startswith("text/"):
-        raise HTTPException(status_code=400, detail="Поддерживаются только текстовые файлы")
+    allowed_types = set(getattr(config, "WEBCHAT_ALLOWED_FILE_TYPES", []))
+    allowed_exts = set(getattr(config, "WEBCHAT_ALLOWED_FILE_EXTENSIONS", []))
+    content_type = (uploaded_file.content_type or "").lower()
+    suffix = Path(uploaded_file.filename or "").suffix.lower()
+    if allowed_types and content_type not in allowed_types and suffix not in allowed_exts:
+        allowed_display = ", ".join(sorted(allowed_exts)) or ", ".join(sorted(allowed_types))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only files of types {allowed_display} are allowed.",
+        )
     data = await uploaded_file.read()
     chat_file = storage.store_file(dialog_id, uploaded_file.filename, uploaded_file.content_type, data)
     return chat_file.to_dict()

@@ -4,6 +4,9 @@ const state = {
   history: [],
   tasks: [],
   categories: [],
+  user: null,
+  allowedFileTypes: [],
+  allowedFileExtensions: [],
 };
 
 async function fetchJSON(url, options = {}) {
@@ -21,6 +24,49 @@ async function fetchJSON(url, options = {}) {
     return null;
   }
   return response.json();
+}
+
+function updateFileInputAccept() {
+  const input = document.getElementById("file-input");
+  if (!input) {
+    return;
+  }
+  const acceptValues = [];
+  if (Array.isArray(state.allowedFileExtensions) && state.allowedFileExtensions.length > 0) {
+    acceptValues.push(...state.allowedFileExtensions);
+  }
+  if (Array.isArray(state.allowedFileTypes) && state.allowedFileTypes.length > 0) {
+    acceptValues.push(...state.allowedFileTypes);
+  }
+  if (acceptValues.length > 0) {
+    input.setAttribute("accept", acceptValues.join(","));
+  } else {
+    input.removeAttribute("accept");
+  }
+}
+
+function isFileAllowed(file) {
+  const allowedTypes = Array.isArray(state.allowedFileTypes) ? state.allowedFileTypes : [];
+  const allowedExts = Array.isArray(state.allowedFileExtensions) ? state.allowedFileExtensions : [];
+  const type = (file.type || "").toLowerCase();
+  const extension = file.name && file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "";
+  const dotExtension = extension ? `.${extension}` : "";
+  const typeAllowed = allowedTypes.length === 0 || allowedTypes.includes(type);
+  const extAllowed = allowedExts.length === 0 || (dotExtension && allowedExts.includes(dotExtension));
+  return typeAllowed || extAllowed;
+}
+
+function allowedFilesHint() {
+  const exts = Array.isArray(state.allowedFileExtensions) ? state.allowedFileExtensions : [];
+  const types = Array.isArray(state.allowedFileTypes) ? state.allowedFileTypes : [];
+  const parts = [];
+  if (exts.length > 0) {
+    parts.push(exts.join(", "));
+  }
+  if (types.length > 0) {
+    parts.push(types.join(", "));
+  }
+  return parts.join(", ");
 }
 
 function formatDate(iso) {
@@ -105,6 +151,14 @@ function renderCategories(categories) {
     option.textContent = category;
     select.appendChild(option);
   });
+}
+
+async function loadSession() {
+  const data = await fetchJSON("/api/session");
+  state.user = data.user || null;
+  state.allowedFileTypes = data.allowed_file_types || [];
+  state.allowedFileExtensions = data.allowed_file_extensions || [];
+  updateFileInputAccept();
 }
 
 async function loadHistory() {
@@ -231,6 +285,10 @@ async function uploadAttachment(dialogId, fileInput) {
     return null;
   }
   const file = fileInput.files[0];
+  if (!isFileAllowed(file)) {
+    const hint = allowedFilesHint();
+    throw new Error(hint ? `Unsupported file type. Allowed: ${hint}` : "Unsupported file type.");
+  }
   const formData = new FormData();
   formData.append("uploaded_file", file);
   const response = await fetch(`/api/dialogs/${dialogId}/files`, {
@@ -238,7 +296,8 @@ async function uploadAttachment(dialogId, fileInput) {
     body: formData,
   });
   if (!response.ok) {
-    throw new Error("Не удалось загрузить файл");
+    const text = await response.text();
+    throw new Error(text || "Failed to upload the selected file.");
   }
   const data = await response.json();
   fileInput.value = "";
@@ -335,6 +394,7 @@ function setupEventListeners() {
 
 async function bootstrap() {
   setupEventListeners();
+  await loadSession();
   await Promise.all([loadHistory(), loadTasks(), loadCategories()]);
 }
 
