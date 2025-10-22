@@ -19,9 +19,14 @@ def getEmbeddingModel()-> HuggingFaceEmbeddings:
     global _embedding_model
     if _embedding_model is None:
         logging.info(f"loading model for embedding:  {config.EMBEDDING_MODEL}")
+        model_kwargs = {"device": _device}
+        if _device == "cpu":
+            # Ensure weights are loaded directly on CPU instead of meta tensors
+            model_kwargs["low_cpu_mem_usage"] = False
+
         _embedding_model = HuggingFaceEmbeddings(
             model_name=config.EMBEDDING_MODEL,
-            model_kwargs={"device": _device}, 
+            model_kwargs=model_kwargs,
             encode_kwargs={"normalize_embeddings": True}
         )
     return _embedding_model
