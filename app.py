@@ -218,3 +218,14 @@ async def chat_websocket(websocket: WebSocket, dialog_id: str) -> None:
 def export_status(dialog_id: str, user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
     path = EXPORT_DIR / f"{dialog_id}.txt"
     return {"exists": path.exists()}
+
+
+def main() -> None:
+    """Run the web chat application with Uvicorn."""
+    import uvicorn
+
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
+
+
+if __name__ == "__main__":
+    main()
