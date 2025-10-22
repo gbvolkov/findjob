@@ -267,11 +267,10 @@ async function sendMessage(content) {
       content,
       attachments: attachmentId ? [attachmentId] : [],
     };
-    const message = await fetchJSON(`/api/dialogs/${state.currentDialogId}/messages`, {
+    await fetchJSON(`/api/dialogs/${state.currentDialogId}/messages`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    renderMessage(message);
     const simulated = await fetchJSON(`/api/dialogs/${state.currentDialogId}/messages`);
     renderMessages(simulated.messages);
   }

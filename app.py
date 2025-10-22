@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import (
     Depends,
@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from webchat.agent_runtime import agent_manager
 from webchat.models import Dialog
 from webchat.storage import EXPORT_DIR, storage
 
@@ -93,8 +94,9 @@ def get_dialog(dialog_id: str, user: UserContext = Depends(get_current_user)) ->
 
 
 @app.delete("/api/dialogs/{dialog_id}")
-def delete_dialog(dialog_id: str, user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
+async def delete_dialog(dialog_id: str, user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
     storage.delete_dialog(dialog_id)
+    await agent_manager.reset_dialog(dialog_id)
     return {"status": "deleted"}
 
 
@@ -106,8 +108,50 @@ def export_dialog(dialog_id: str, user: UserContext = Depends(get_current_user))
     return FileResponse(str(export_path), filename=f"dialog-{dialog_id}.txt", media_type="text/plain")
 
 
+async def _generate_bot_message(
+    dialog: Dialog,
+    user: UserContext,
+    content: str,
+    attachment_ids: List[str],
+) -> Dict[str, Any]:
+    attachments_payload: List[dict] = []
+    for file_id in attachment_ids:
+        chat_file = storage.get_file(dialog.id, file_id)
+        if not chat_file:
+            continue
+        try:
+            file_text = await asyncio.to_thread(
+                Path(chat_file.path).read_text, encoding="utf-8", errors="ignore"
+            )
+        except Exception:
+            file_text = ""
+        attachments_payload.append(
+            {
+                "type": "text",
+                "text": f"[Файл {chat_file.filename}]\n{file_text.strip()}",
+            }
+        )
+
+    message_parts = [{"type": "text", "text": content}]
+    message_parts.extend(attachments_payload)
+    try:
+        response_text = await agent_manager.run_dialog(
+            dialog_id=dialog.id,
+            user_id=str(user.get("id")),
+            role=dialog.bot_type,
+            message_parts=message_parts,
+        )
+    except Exception:
+        response_text = "Произошла ошибка при обращении к интеллектуальному помощнику. Попробуйте позже."
+
+    bot_message = storage.add_message(dialog.id, "bot", response_text)
+    return bot_message.to_dict()
+
+
 @app.post("/api/dialogs/{dialog_id}/messages")
-def add_user_message(dialog_id: str, payload: Dict[str, Any], user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
+async def add_user_message(
+    dialog_id: str, payload: Dict[str, Any], user: UserContext = Depends(get_current_user)
+) -> Dict[str, Any]:
     dialog = storage.get_dialog(dialog_id)
     if not dialog:
         raise HTTPException(status_code=404, detail="Диалог не найден")
@@ -116,7 +160,8 @@ def add_user_message(dialog_id: str, payload: Dict[str, Any], user: UserContext 
         raise HTTPException(status_code=400, detail="Сообщение не может быть пустым")
     attachments = payload.get("attachments") or []
     message = storage.add_message(dialog_id, "user", message_text, attachments)
-    return message.to_dict()
+    bot_response = await _generate_bot_message(dialog, user, message_text, attachments)
+    return {"user": message.to_dict(), "bot": bot_response}
 
 
 @app.post("/api/dialogs/{dialog_id}/files")
@@ -151,7 +196,9 @@ def list_categories(user: UserContext = Depends(get_current_user)) -> Dict[str, 
 
 
 @app.post("/api/dialogs/{dialog_id}/commands")
-def run_command(dialog_id: str, payload: Dict[str, Any], user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
+async def run_command(
+    dialog_id: str, payload: Dict[str, Any], user: UserContext = Depends(get_current_user)
+) -> Dict[str, Any]:
     command = payload.get("command")
     if not command:
         raise HTTPException(status_code=400, detail="Команда не указана")
@@ -159,6 +206,7 @@ def run_command(dialog_id: str, payload: Dict[str, Any], user: UserContext = Dep
         if not storage.get_dialog(dialog_id):
             raise HTTPException(status_code=404, detail="Диалог не найден")
         storage.clear_dialog(dialog_id)
+        await agent_manager.reset_dialog(dialog_id)
         return {"status": "cleared"}
     if command == "help":
         return {
@@ -187,11 +235,6 @@ def get_messages(dialog_id: str, user: UserContext = Depends(get_current_user)) 
     return {"messages": [message.to_dict() for message in dialog.messages]}
 
 
-async def _simulate_bot_response(dialog: Dialog, content: str) -> str:
-    await asyncio.sleep(0.5)
-    return f"Получил: {content}\n\n(Это демонстрационный ответ бота типа {dialog.bot_type}.)"
-
-
 @app.websocket("/ws/dialogs/{dialog_id}")
 async def chat_websocket(websocket: WebSocket, dialog_id: str) -> None:
     await websocket.accept()
@@ -199,6 +242,7 @@ async def chat_websocket(websocket: WebSocket, dialog_id: str) -> None:
     if not dialog:
         await websocket.close(code=4404)
         return
+    user_id = websocket.headers.get("x-user-id", "web-user")
     try:
         while True:
             data = await websocket.receive_text()
@@ -207,9 +251,13 @@ async def chat_websocket(websocket: WebSocket, dialog_id: str) -> None:
             attachments = payload.get("attachments") or []
             user_message = storage.add_message(dialog_id, "user", content, attachments)
             await websocket.send_json({"event": "ack", "message": user_message.to_dict()})
-            bot_reply = await _simulate_bot_response(dialog, content)
-            bot_message = storage.add_message(dialog_id, "bot", bot_reply)
-            await websocket.send_json({"event": "bot_message", "message": bot_message.to_dict()})
+            bot_message = await _generate_bot_message(
+                dialog,
+                {"id": user_id},
+                content,
+                attachments,
+            )
+            await websocket.send_json({"event": "bot_message", "message": bot_message})
     except WebSocketDisconnect:
         return
 
