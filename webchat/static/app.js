@@ -80,13 +80,219 @@ function clearChatWindow() {
   container.innerHTML = "";
 }
 
+
+function appendWithHighlights(parent, text) {
+  if (text === null || text === undefined) {
+    return;
+  }
+  const raw = String(text);
+  const pattern = /<highlighttext>(.*?)<\/highlighttext>/gis;
+  let lastIndex = 0;
+  let match;
+  while ((match = pattern.exec(raw)) !== null) {
+    const before = raw.slice(lastIndex, match.index);
+    if (before) {
+      parent.append(before);
+    }
+    const em = document.createElement("em");
+    appendWithHighlights(em, match[1]);
+    parent.appendChild(em);
+    lastIndex = match.index + match[0].length;
+  }
+  const remaining = raw.slice(lastIndex);
+  if (remaining) {
+    parent.append(remaining);
+  }
+}
+
+function shouldFormatJobAgentContent(content) {
+  if (typeof content !== "string") {
+    return false;
+  }
+  return /???????? ???????:/i.test(content) || /^\s*\d+\.\s+/m.test(content);
+}
+
+function buildJobSummary(lines) {
+  const summary = document.createElement("div");
+  summary.className = "job-summary";
+  let hasContent = false;
+
+  lines.forEach((line) => {
+    const value = line.trim();
+    if (!value) {
+      return;
+    }
+    if (/^???????? ???????:/i.test(value)) {
+      const heading = document.createElement("p");
+      heading.className = "job-summary-heading";
+      heading.textContent = "???????? ???????:";
+      summary.appendChild(heading);
+
+      const allPositions = value.replace(/^???????? ???????:\s*/i, "");
+      const items = allPositions
+        .split(/[,;]\s*/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      if (items.length > 0) {
+        const list = document.createElement("ul");
+        list.className = "job-desired-positions";
+        items.forEach((item) => {
+          const li = document.createElement("li");
+          const strong = document.createElement("strong");
+          appendWithHighlights(strong, item);
+          li.appendChild(strong);
+          list.appendChild(li);
+        });
+        summary.appendChild(list);
+      }
+      hasContent = true;
+      return;
+    }
+    const lineElement = document.createElement("p");
+    lineElement.className = "job-summary-line";
+    appendWithHighlights(lineElement, value);
+    summary.appendChild(lineElement);
+    hasContent = true;
+  });
+
+  return hasContent ? summary : null;
+}
+
+function buildJobVacancy(block) {
+  const normalized = block.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const vacancy = document.createElement("article");
+  vacancy.className = "job-vacancy";
+  let hasContent = false;
+
+  const headerLine = (lines.shift() || "").trim();
+  if (headerLine) {
+    const match = headerLine.match(/^(\d+)\.\s*(.+)$/);
+    const header = document.createElement("div");
+    header.className = "job-vacancy-header";
+    if (match) {
+      const index = document.createElement("span");
+      index.className = "job-vacancy-index";
+      index.textContent = `${match[1]}.`;
+      header.appendChild(index);
+
+      const title = document.createElement("strong");
+      title.className = "job-vacancy-title";
+      appendWithHighlights(title, match[2].trim());
+      header.appendChild(title);
+    } else {
+      const title = document.createElement("strong");
+      title.className = "job-vacancy-title";
+      appendWithHighlights(title, headerLine);
+      header.appendChild(title);
+    }
+    vacancy.appendChild(header);
+    hasContent = true;
+  }
+
+  lines.forEach((line) => {
+    const value = line.trim();
+    if (!value) {
+      return;
+    }
+    if (/^??????:/i.test(value)) {
+      const url = value.replace(/^??????:\s*/i, "").trim();
+      if (url) {
+        const linkContainer = document.createElement("p");
+        linkContainer.className = "job-vacancy-link";
+        linkContainer.append("??????: ");
+
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.textContent = url;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+
+        linkContainer.appendChild(anchor);
+        vacancy.appendChild(linkContainer);
+        hasContent = true;
+        return;
+      }
+    }
+    const paragraph = document.createElement("p");
+    paragraph.className = "job-vacancy-line";
+    appendWithHighlights(paragraph, value);
+    vacancy.appendChild(paragraph);
+    hasContent = true;
+  });
+
+  return hasContent ? vacancy : null;
+}
+
+function buildJobAgentFragment(content) {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const blocks = normalized.split(/\n{2,}/);
+  const summaryLines = [];
+  const vacancyBlocks = [];
+
+  blocks.forEach((block) => {
+    const trimmed = block.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (/^\d+\.\s/.test(trimmed)) {
+      vacancyBlocks.push(trimmed);
+    } else {
+      summaryLines.push(...trimmed.split("\n"));
+    }
+  });
+
+  const fragment = document.createDocumentFragment();
+  const summary = buildJobSummary(summaryLines);
+  if (summary) {
+    fragment.appendChild(summary);
+  }
+
+  if (vacancyBlocks.length > 0) {
+    const vacanciesContainer = document.createElement("div");
+    vacanciesContainer.className = "job-vacancies";
+    vacancyBlocks.forEach((block) => {
+      const vacancy = buildJobVacancy(block);
+      if (vacancy) {
+        vacanciesContainer.appendChild(vacancy);
+      }
+    });
+    if (vacanciesContainer.childElementCount > 0) {
+      fragment.appendChild(vacanciesContainer);
+    }
+  }
+
+  return fragment.childNodes.length > 0 ? fragment : null;
+}
+
+function renderMessageContent(container, content) {
+  container.classList.remove("job-agent");
+  container.textContent = "";
+  if (content === null || content === undefined) {
+    return;
+  }
+  const raw = typeof content === "string" ? content : String(content);
+  const normalized = raw.replace(/\r\n/g, "\n");
+  if (shouldFormatJobAgentContent(normalized)) {
+    const fragment = buildJobAgentFragment(normalized);
+    if (fragment) {
+      container.classList.add("job-agent");
+      container.appendChild(fragment);
+      return;
+    }
+  }
+  appendWithHighlights(container, raw);
+}
 function renderMessage(message) {
   const template = document.getElementById("message-template");
   const node = template.content.firstElementChild.cloneNode(true);
   node.classList.toggle("user", message.sender === "user");
   node.querySelector(".sender").textContent = message.sender === "user" ? "Вы" : "Бот";
   node.querySelector(".timestamp").textContent = formatDate(message.created_at);
-  node.querySelector(".message-content").textContent = message.content;
+  const contentNode = node.querySelector(".message-content");
+
+  renderMessageContent(contentNode, message.content);
   const attachments = node.querySelector(".attachments");
   attachments.innerHTML = "";
   (message.attachments || []).forEach((fileId) => {

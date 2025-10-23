@@ -176,6 +176,82 @@ body {
   font-size: 0.95rem;
 }
 
+.message-content.job-agent {
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.job-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.job-summary-heading {
+  margin: 0;
+  font-weight: 600;
+}
+
+.job-summary-line {
+  margin: 0;
+}
+
+.job-desired-positions {
+  margin: 0.25rem 0 0 1.25rem;
+  padding: 0;
+  list-style: disc;
+}
+
+.job-desired-positions li {
+  margin: 0.2rem 0;
+}
+
+.job-vacancies {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.job-vacancy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.job-vacancy:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.job-vacancy-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.job-vacancy-index {
+  font-weight: 600;
+  color: var(--muted-text);
+}
+
+.job-vacancy-title {
+  font-weight: 600;
+}
+
+.job-vacancy-line,
+.job-vacancy-link {
+  margin: 0;
+}
+
+.job-vacancy-link a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
 .attachments a {
   display: inline-flex;
   align-items: center;
