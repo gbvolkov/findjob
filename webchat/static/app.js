@@ -81,6 +81,17 @@ function clearChatWindow() {
 }
 
 
+const DESIRED_POSITIONS_LABEL = "\u0416\u0435\u043b\u0430\u0435\u043c\u044b\u0435 \u043f\u043e\u0437\u0438\u0446\u0438\u0438:";
+const LINK_LABEL = "\u0421\u0441\u044b\u043b\u043a\u0430:";
+
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const DESIRED_POSITIONS_ANY_RE = new RegExp(escapeRegex(DESIRED_POSITIONS_LABEL), "i");
+const DESIRED_POSITIONS_PREFIX_RE = new RegExp(`${escapeRegex(DESIRED_POSITIONS_LABEL)}\\s*`, "i");
+const LINK_PREFIX_RE = new RegExp(`${escapeRegex(LINK_LABEL)}\\s*`, "i");
+
 function appendWithHighlights(parent, text) {
   if (text === null || text === undefined) {
     return;
@@ -109,7 +120,7 @@ function shouldFormatJobAgentContent(content) {
   if (typeof content !== "string") {
     return false;
   }
-  return /???????? ???????:/i.test(content) || /^\s*\d+\.\s+/m.test(content);
+  return DESIRED_POSITIONS_ANY_RE.test(content) || /^\s*\d+\.\s+/m.test(content);
 }
 
 function buildJobSummary(lines) {
@@ -122,13 +133,13 @@ function buildJobSummary(lines) {
     if (!value) {
       return;
     }
-    if (/^???????? ???????:/i.test(value)) {
+    if (DESIRED_POSITIONS_PREFIX_RE.test(value)) {
       const heading = document.createElement("p");
       heading.className = "job-summary-heading";
-      heading.textContent = "???????? ???????:";
+      heading.textContent = DESIRED_POSITIONS_LABEL;
       summary.appendChild(heading);
 
-      const allPositions = value.replace(/^???????? ???????:\s*/i, "");
+      const allPositions = value.replace(DESIRED_POSITIONS_PREFIX_RE, "");
       const items = allPositions
         .split(/[,;]\s*/)
         .map((item) => item.trim())
@@ -196,12 +207,12 @@ function buildJobVacancy(block) {
     if (!value) {
       return;
     }
-    if (/^??????:/i.test(value)) {
-      const url = value.replace(/^??????:\s*/i, "").trim();
+    if (LINK_PREFIX_RE.test(value)) {
+      const url = value.replace(LINK_PREFIX_RE, "").trim();
       if (url) {
         const linkContainer = document.createElement("p");
         linkContainer.className = "job-vacancy-link";
-        linkContainer.append("??????: ");
+        linkContainer.append(`${LINK_LABEL} `);
 
         const anchor = document.createElement("a");
         anchor.href = url;
